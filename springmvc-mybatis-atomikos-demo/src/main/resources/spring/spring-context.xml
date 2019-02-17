@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx.xsd">
+
+
+
+    <bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+        <property name="order" value="1"/>
+        <property name="ignoreUnresolvablePlaceholders" value="true"/>
+        <property name="locations">
+            <list>
+                <value>classpath*:*.properties</value>
+            </list>
+        </property>
+    </bean>
+    <context:component-scan base-package="com.github.vspro">
+        <context:exclude-filter type="annotation" expression="org.springframework.stereotype.Controller"/>
+    </context:component-scan>
+
+    <bean id="abstractXaDataSource" class="com.atomikos.jdbc.AtomikosDataSourceBean" init-method="init" destroy-method="close" abstract="true">
+        <property name="poolSize" value="${datasource.poolSize}"/>
+        <property name="minPoolSize" value="${datasource.minPoolSize}"/>
+        <property name="maxPoolSize" value="${datasource.maxPoolSize}"/>
+        <property name="borrowConnectionTimeout" value="${datasource.borrowConnectionTimeout}"/>
+        <property name="reapTimeout" value="${datasource.reapTimeout}"/>
+        <property name="maxIdleTime" value="${datasource.maxIdleTime}"/>
+        <property name="maintenanceInterval" value="${datasource.maintenanceInterval}"/>
+        <property name="loginTimeout" value="${datasource.loginTimeout}"/>
+        <property name="logWriter" value="${datasource.logWriter}"/>
+    </bean>
+    <bean id="masterDataSource" parent="abstractXaDataSource">
+        <property name="uniqueResourceName" value="master"/>
+        <property name="xaDataSourceClassName" value="${datasource.xaDataSourceClassName}"/>
+        <property name="testQuery" value="${master.datasource.testQuery}"/>
+        <property name="xaProperties">
+            <props>
+                <prop key="URL">${master.datasource.url}</prop>
+                <prop key="user">${master.datasource.username}</prop>
+                <prop key="password">${master.datasource.password}</prop>
+            </props>
+        </property>
+    </bean>
+
+    <bean id="slaveDataSource" parent="abstractXaDataSource">
+        <property name="uniqueResourceName" value="slave"/>
+        <property name="xaDataSourceClassName" value="${datasource.xaDataSourceClassName}"/>
+        <property name="testQuery" value="${slave.datasource.testQuery}"/>
+        <property name="xaProperties">
+            <props>
+                <prop key="URL">${slave.datasource.url}</prop>
+                <prop key="user">${slave.datasource.username}</prop>
+                <prop key="password">${slave.datasource.password}</prop>
+            </props>
+        </property>
+    </bean>
+
+
+    <bean id="masterSqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+        <property name="dataSource" ref="masterDataSource"/>
+        <property name="mapperLocations" value="classpath:mappings/master/**/*.xml"/>
+        <property name="typeAliasesPackage" value="com.github.vspro.**.persistent.**.domain"/>
+        <property name="configLocation" value="classpath:spring/mybatis-config.xml"/>
+    </bean>
+    <bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+        <property name="sqlSessionFactoryBeanName" value="masterSqlSessionFactory"/>
+        <property name="basePackage" value="com.github.vspro.atomikos.master.persistence.dao"/>
+    </bean>
+
+
+    <bean id="masterSessionTemplate" class="org.mybatis.spring.SqlSessionTemplate">
+        <constructor-arg name="sqlSessionFactory" ref="masterSqlSessionFactory"/>
+    </bean>
+
+    <bean id="slaveSqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+        <property name="dataSource" ref="slaveDataSource"/>
+        <property name="mapperLocations" value="classpath:mappings/slave/**/*.xml"/>
+        <property name="typeAliasesPackage" value="com.github.vspro.**.persistent.**.domain"/>
+        <property name="configLocation" value="classpath:spring/mybatis-config.xml"/>
+    </bean>
+
+    <bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+        <property name="sqlSessionFactoryBeanName" value="slaveSqlSessionFactory"/>
+        <property name="basePackage" value="com.github.vspro.atomikos.slave.persistence.dao"/>
+    </bean>
+
+    <bean id="slaveSessionTemplate" class="org.mybatis.spring.SqlSessionTemplate">
+        <constructor-arg name="sqlSessionFactory" ref="slaveSqlSessionFactory"/>
+    </bean>
+
+    <bean id="atomikosTransactionManager" class="com.atomikos.icatch.jta.UserTransactionManager" init-method="init" destroy-method="close">
+        <property name="forceShutdown" value="true"/>
+    </bean>
+
+    <bean id="atomikosUserTransaction" class="com.atomikos.icatch.jta.UserTransactionImp">
+        <property name="transactionTimeout" value="300"/>
+    </bean>
+
+    <bean id="transactionManager" class="org.springframework.transaction.jta.JtaTransactionManager">
+        <property name="transactionManager" ref="atomikosTransactionManager"/>
+        <property name="userTransaction" ref="atomikosUserTransaction"/>
+        <property name="allowCustomIsolationLevels" value="true"/>
+    </bean>
+
+    <tx:annotation-driven/>
+
+</beans>
